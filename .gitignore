@@ -47,4 +47,4 @@ server/uploads/
 server/output/
 server/node_modules/
 server/dist/
-server/.env
+# server/.env
