@@ -41,6 +41,21 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app needs access to your photos to create videos from images.",
+          "cameraPermission": "The app needs access to your camera to take photos for videos."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow the app to save videos to your photo library.",
+          "savePhotosPermission": "Allow the app to save videos to your photo library.",
+          "isAccessMediaLocationEnabled": true
+        }
       ]
     ],
     "experiments": {

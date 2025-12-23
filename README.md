@@ -1,50 +1,47 @@
-# Welcome to your Expo app 👋
+# Video Creator App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+React Native приложение для создания видео из изображений с переходами.
 
-## Get started
+## Установка и запуск
 
-1. Install dependencies
+1. Установить зависимости:
 
    ```bash
    npm install
+   cd server && npm install && cd ..
    ```
 
-2. Start the app
+2. Для iOS:
 
    ```bash
-   npx expo start
+   npm run ios
    ```
 
-In the output, you'll find options to open the app in a
+3. Для Android:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   npm run android
+   ```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Подход к видео рендерингу
 
-## Get a fresh project
+- **Архитектура**: Разделение на клиент (React Native) и сервер (Node.js/Express)
+- **Рендеринг**: FFmpeg через `child_process.spawn` для прямого контроля процесса
+- **Переходы**:
+  - Crossfade/Slide: `xfade` фильтр с наложением кадров
+  - Zoom: `zoompan` для масштабирования каждого изображения
+  - Ken Burns: комбинация `zoompan` (панорамирование) + `xfade` (переходы)
+- **Прогресс**: Парсинг stderr FFmpeg для отслеживания времени/кадров
+- **Файлы**: Multer для загрузки, сессии для управления состоянием рендеринга
 
-When you're ready, run:
+## Известные ограничения
 
-```bash
-npm run reset-project
-```
+- На iOS симуляторе список приложений для шаринга может быть пустым (на реальном устройстве работает)
+- Видео файлы временно хранятся на сервере до скачивания/удаления
+- Максимум 5 изображений на видео
+- Длительность изображения: 2-4 секунды
+- Разрешения: только 720p и 1080p
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Время разработки
 
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Приблизительно 6 часов.
