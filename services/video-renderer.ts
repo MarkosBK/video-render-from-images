@@ -1,7 +1,7 @@
-import { API_URL } from "@/constants/api";
-import { ImageInfo, VideoSettings, useVideoStore } from "@/stores/video-store";
-import * as FileSystem from "expo-file-system";
-import * as ImageManipulator from "expo-image-manipulator";
+import { API_URL } from '@/constants/api';
+import { ImageInfo, VideoSettings, useVideoStore } from '@/stores/video-store';
+import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 export class VideoRenderer {
   private currentSessionId: string | null = null;
@@ -10,37 +10,107 @@ export class VideoRenderer {
   async createVideo(
     images: ImageInfo[],
     settings: VideoSettings,
-    onProgress: (progress: number) => void,
+    onProgress: (progress: number) => void
   ): Promise<string> {
     try {
-      // 1. Конвертируем все изображения в JPEG
+      // 1. Конвертируем все изображения в JPEG параллельно с таймаутами и retry
+      const CONVERSION_TIMEOUT = 30000;
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 1000;
+      const maxWidth = settings.resolution === '1080p' ? 1920 : 1280;
+      const maxHeight = settings.resolution === '1080p' ? 1080 : 720;
+
+      const convertImage = async (
+        image: ImageInfo,
+        index: number
+      ): Promise<ImageManipulator.ImageResult> => {
+        let localUri = image.uri;
+        let tempFile: FileSystem.File | null = null;
+
+        // Копируем файл в локальное хранилище для ускорения доступа
+        try {
+          const localFileName = `temp_image_${index}_${Date.now()}.jpg`;
+          tempFile = new FileSystem.File(FileSystem.Paths.cache, localFileName);
+          const sourceFile = new FileSystem.File(image.uri);
+          sourceFile.copy(tempFile);
+          localUri = tempFile.uri;
+        } catch {
+          // Продолжаем с оригинальным URI
+        }
+
+        let lastError: any = null;
+
+        // Retry механизм
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            if (attempt > 1) {
+              await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY * attempt));
+            }
+
+            const conversionPromise = ImageManipulator.manipulateAsync(
+              localUri,
+              [{ resize: { width: maxWidth, height: maxHeight } }],
+              {
+                compress: 0.7,
+                format: ImageManipulator.SaveFormat.JPEG,
+              }
+            );
+
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              setTimeout(() => {
+                reject(new Error(`Таймаут конвертации изображения ${index + 1}`));
+              }, CONVERSION_TIMEOUT);
+            });
+
+            const result = await Promise.race([conversionPromise, timeoutPromise]);
+
+            // Удаляем временную копию
+            if (tempFile) {
+              try {
+                tempFile.delete();
+              } catch {}
+            }
+
+            return result;
+          } catch (error: any) {
+            lastError = error;
+          }
+        }
+
+        // Очистка при ошибке
+        if (tempFile) {
+          try {
+            tempFile.delete();
+          } catch {}
+        }
+
+        throw new Error(
+          `Не удалось сконвертировать изображение ${index + 1}: ${lastError?.message || 'Неизвестная ошибка'}`
+        );
+      };
+
       const convertedImages = await Promise.all(
-        images.map((image) =>
-          ImageManipulator.manipulateAsync(image.uri, [], {
-            compress: 0.9,
-            format: ImageManipulator.SaveFormat.JPEG,
-          }),
-        ),
+        images.map((image, index) => convertImage(image, index))
       );
 
       // 2. Подготавливаем FormData с изображениями
       const formData = new FormData();
       convertedImages.forEach((result, i) => {
-        formData.append("images", {
+        formData.append('images', {
           uri: result.uri,
           name: `image${i}.jpg`,
-          type: "image/jpeg",
+          type: 'image/jpeg',
         } as any);
       });
 
-      formData.append("settings", JSON.stringify(settings));
+      formData.append('settings', JSON.stringify(settings));
 
       // 3. Отправляем запрос на рендеринг
       const renderResponse = await fetch(`${API_URL}/render`, {
-        method: "POST",
+        method: 'POST',
         body: formData,
         headers: {
-          Accept: "application/json",
+          Accept: 'application/json',
         },
       });
 
@@ -49,11 +119,9 @@ export class VideoRenderer {
 
         try {
           const errorData = JSON.parse(errorText);
-          throw new Error(errorData.error || "Ошибка при запуске рендеринга");
+          throw new Error(errorData.error || 'Ошибка при запуске рендеринга');
         } catch {
-          throw new Error(
-            `Ошибка сервера: ${renderResponse.status} ${errorText}`,
-          );
+          throw new Error(`Ошибка сервера: ${renderResponse.status} ${errorText}`);
         }
       }
 
@@ -69,15 +137,12 @@ export class VideoRenderer {
       await this.pollRenderStatus(sessionId, onProgress);
 
       // 5. Скачиваем готовое видео
-      const outputFile = new FileSystem.File(
-        FileSystem.Paths.document,
-        `video_${Date.now()}.mp4`,
-      );
+      const outputFile = new FileSystem.File(FileSystem.Paths.document, `video_${Date.now()}.mp4`);
 
       const downloadedFile = await FileSystem.File.downloadFileAsync(
         `${API_URL}/download/${sessionId}`,
         outputFile,
-        { idempotent: true },
+        { idempotent: true }
       );
 
       this.currentSessionId = null;
@@ -96,7 +161,7 @@ export class VideoRenderer {
 
   private async pollRenderStatus(
     sessionId: string,
-    onProgress: (progress: number) => void,
+    onProgress: (progress: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const stopPolling = () => {
@@ -112,25 +177,25 @@ export class VideoRenderer {
 
           if (!statusResponse.ok) {
             stopPolling();
-            reject(new Error("Ошибка при получении статуса"));
+            reject(new Error('Ошибка при получении статуса'));
             return;
           }
 
           const statusData = await statusResponse.json();
 
           if (statusData.progress !== undefined) {
-            onProgress(statusData.progress);
+            onProgress(Math.min(100, Math.max(0, statusData.progress)));
           }
 
-          if (statusData.status === "completed") {
+          if (statusData.status === 'completed') {
             stopPolling();
             resolve();
-          } else if (statusData.status === "error") {
+          } else if (statusData.status === 'error') {
             stopPolling();
-            reject(new Error(statusData.error || "Ошибка рендеринга"));
-          } else if (statusData.status === "cancelled") {
+            reject(new Error(statusData.error || 'Ошибка рендеринга'));
+          } else if (statusData.status === 'cancelled') {
             stopPolling();
-            reject(new Error("Рендеринг отменен"));
+            reject(new Error('Рендеринг отменен'));
           }
         } catch (error) {
           stopPolling();
@@ -149,12 +214,12 @@ export class VideoRenderer {
     }
 
     const response = await fetch(`${API_URL}/cancel/${this.currentSessionId}`, {
-      method: "POST",
+      method: 'POST',
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || "Ошибка при отмене рендеринга");
+      throw new Error(errorData.error || 'Ошибка при отмене рендеринга');
     }
 
     this.currentSessionId = null;
