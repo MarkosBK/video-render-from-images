@@ -1,7 +1,6 @@
-import { API_URL } from "@/constants/api";
-import { ImageInfo, VideoSettings, useVideoStore } from "@/stores/video-store";
-import * as FileSystem from "expo-file-system";
-import * as ImageManipulator from "expo-image-manipulator";
+import { API_URL } from '@/constants/api';
+import { ImageInfo, VideoSettings, useVideoStore } from '@/stores/video-store';
+import * as FileSystem from 'expo-file-system';
 
 export class VideoRenderer {
   private currentSessionId: string | null = null;
@@ -10,37 +9,32 @@ export class VideoRenderer {
   async createVideo(
     images: ImageInfo[],
     settings: VideoSettings,
-    onProgress: (progress: number) => void,
+    onProgress: (progress: number) => void
   ): Promise<string> {
     try {
-      // 1. Конвертируем все изображения в JPEG
-      const convertedImages = await Promise.all(
-        images.map((image) =>
-          ImageManipulator.manipulateAsync(image.uri, [], {
-            compress: 0.9,
-            format: ImageManipulator.SaveFormat.JPEG,
-          }),
-        ),
-      );
-
-      // 2. Подготавливаем FormData с изображениями
+      // 1. Подготавливаем FormData с оригинальными изображениями
+      // Сервер будет конвертировать их в JPEG
       const formData = new FormData();
-      convertedImages.forEach((result, i) => {
-        formData.append("images", {
-          uri: result.uri,
-          name: `image${i}.jpg`,
-          type: "image/jpeg",
+      images.forEach((image, i) => {
+        // Определяем расширение и MIME тип из URI
+        const extension = this.getFileExtension(image.uri);
+        const mimeType = this.getMimeType(extension);
+
+        formData.append('images', {
+          uri: image.uri,
+          name: `image${i}${extension}`,
+          type: mimeType,
         } as any);
       });
 
-      formData.append("settings", JSON.stringify(settings));
+      formData.append('settings', JSON.stringify(settings));
 
-      // 3. Отправляем запрос на рендеринг
+      // 2. Отправляем запрос на рендеринг
       const renderResponse = await fetch(`${API_URL}/render`, {
-        method: "POST",
+        method: 'POST',
         body: formData,
         headers: {
-          Accept: "application/json",
+          Accept: 'application/json',
         },
       });
 
@@ -49,11 +43,9 @@ export class VideoRenderer {
 
         try {
           const errorData = JSON.parse(errorText);
-          throw new Error(errorData.error || "Ошибка при запуске рендеринга");
+          throw new Error(errorData.error || 'Ошибка при запуске рендеринга');
         } catch {
-          throw new Error(
-            `Ошибка сервера: ${renderResponse.status} ${errorText}`,
-          );
+          throw new Error(`Ошибка сервера: ${renderResponse.status} ${errorText}`);
         }
       }
 
@@ -65,19 +57,16 @@ export class VideoRenderer {
       // Сохраняем sessionId в store для cleanup
       useVideoStore.getState().setSessionId(sessionId);
 
-      // 4. Polling для отслеживания прогресса
+      // 3. Polling для отслеживания прогресса
       await this.pollRenderStatus(sessionId, onProgress);
 
-      // 5. Скачиваем готовое видео
-      const outputFile = new FileSystem.File(
-        FileSystem.Paths.document,
-        `video_${Date.now()}.mp4`,
-      );
+      // 4. Скачиваем готовое видео
+      const outputFile = new FileSystem.File(FileSystem.Paths.document, `video_${Date.now()}.mp4`);
 
       const downloadedFile = await FileSystem.File.downloadFileAsync(
         `${API_URL}/download/${sessionId}`,
         outputFile,
-        { idempotent: true },
+        { idempotent: true }
       );
 
       this.currentSessionId = null;
@@ -96,7 +85,7 @@ export class VideoRenderer {
 
   private async pollRenderStatus(
     sessionId: string,
-    onProgress: (progress: number) => void,
+    onProgress: (progress: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const stopPolling = () => {
@@ -112,7 +101,7 @@ export class VideoRenderer {
 
           if (!statusResponse.ok) {
             stopPolling();
-            reject(new Error("Ошибка при получении статуса"));
+            reject(new Error('Ошибка при получении статуса'));
             return;
           }
 
@@ -122,15 +111,15 @@ export class VideoRenderer {
             onProgress(statusData.progress);
           }
 
-          if (statusData.status === "completed") {
+          if (statusData.status === 'completed') {
             stopPolling();
             resolve();
-          } else if (statusData.status === "error") {
+          } else if (statusData.status === 'error') {
             stopPolling();
-            reject(new Error(statusData.error || "Ошибка рендеринга"));
-          } else if (statusData.status === "cancelled") {
+            reject(new Error(statusData.error || 'Ошибка рендеринга'));
+          } else if (statusData.status === 'cancelled') {
             stopPolling();
-            reject(new Error("Рендеринг отменен"));
+            reject(new Error('Рендеринг отменен'));
           }
         } catch (error) {
           stopPolling();
@@ -149,16 +138,43 @@ export class VideoRenderer {
     }
 
     const response = await fetch(`${API_URL}/cancel/${this.currentSessionId}`, {
-      method: "POST",
+      method: 'POST',
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || "Ошибка при отмене рендеринга");
+      throw new Error(errorData.error || 'Ошибка при отмене рендеринга');
     }
 
     this.currentSessionId = null;
     useVideoStore.getState().setSessionId(null);
+  }
+
+  /**
+   * Получает расширение файла из URI
+   */
+  private getFileExtension(uri: string): string {
+    const match = uri.match(/\.([^./?#]+)(?:[?#]|$)/);
+    if (match) {
+      return `.${match[1].toLowerCase()}`;
+    }
+    // По умолчанию возвращаем .jpg
+    return '.jpg';
+  }
+
+  /**
+   * Определяет MIME тип по расширению файла
+   */
+  private getMimeType(extension: string): string {
+    const mimeTypes: { [key: string]: string } = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.heic': 'image/heic',
+      '.heif': 'image/heif',
+      '.webp': 'image/webp',
+    };
+    return mimeTypes[extension.toLowerCase()] || 'image/jpeg';
   }
 }
 

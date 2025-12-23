@@ -1,17 +1,17 @@
-import express from "express";
-import multer from "multer";
-import path from "path";
-import { v4 as uuidv4 } from "uuid";
-import { VideoRendererService } from "../services/renderer";
-import { RenderSession, VideoSettings } from "../types";
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import { VideoRendererService } from '../services/renderer';
+import { RenderSession, VideoSettings } from '../types';
 import {
   deleteFileIfExists,
   deleteFiles,
   ensureDirectoryExists,
   fileExists,
   getVideoPath,
-} from "../utils/file-utils";
-import { validateImageCount, validateSettings } from "../utils/validation";
+} from '../utils/file-utils';
+import { validateImageCount, validateSettings } from '../utils/validation';
 
 const router = express.Router();
 const renderer = new VideoRendererService();
@@ -22,7 +22,7 @@ const sessions = new Map<string, RenderSession>();
 // Настройка Multer для загрузки изображений
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+    const uploadDir = process.env.UPLOAD_DIR || './uploads';
     ensureDirectoryExists(uploadDir);
     cb(null, uploadDir);
   },
@@ -38,28 +38,35 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB на файл
   },
   fileFilter: (req, file, cb) => {
-    // Принимаем только JPEG (клиент конвертирует все в JPEG)
+    // Принимаем только поддерживаемые форматы изображений
+    // HEIC/HEIF не поддерживаются
     const allowedTypes = [
-      "image/jpeg",
-      "image/jpg",
-      "application/octet-stream", // React Native иногда отправляет так
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+      'application/octet-stream', // React Native иногда отправляет так
     ];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error(`Неподдерживаемый формат изображения: ${file.mimetype}`));
+      cb(
+        new Error(
+          `Неподдерживаемый формат изображения: ${file.mimetype}. HEIC/HEIF не поддерживаются.`
+        )
+      );
     }
   },
 });
 
 // POST /api/render - Начать рендеринг видео
-router.post("/render", upload.array("images", 10), async (req, res) => {
+router.post('/render', upload.array('images', 10), async (req, res) => {
   try {
     const files = req.files as Express.Multer.File[];
 
     if (!files || files.length === 0) {
       return res.status(400).json({
-        error: "Необходимо загрузить изображения",
+        error: 'Необходимо загрузить изображения',
       });
     }
 
@@ -77,32 +84,32 @@ router.post("/render", upload.array("images", 10), async (req, res) => {
       const parsed = JSON.parse(settingsJson);
       if (!validateSettings(parsed)) {
         return res.status(400).json({
-          error: "Неверный формат настроек",
+          error: 'Неверный формат настроек',
         });
       }
       settings = parsed;
-    } catch (e) {
+    } catch {
       return res.status(400).json({
-        error: "Неверный формат настроек",
+        error: 'Неверный формат настроек',
       });
     }
 
     // Создаем сессию
     const sessionId = uuidv4();
 
-    const outputDir = process.env.OUTPUT_DIR || "./output";
+    const outputDir = process.env.OUTPUT_DIR || './output';
     ensureDirectoryExists(outputDir);
 
     const outputPath = getVideoPath(sessionId);
 
-    // Запускаем рендеринг асинхронно
+    // Запускаем рендеринг асинхронно с использованием оригинальных изображений
     const imagePaths = files.map((f) => f.path);
 
     const session: RenderSession = {
       id: sessionId,
-      status: "processing",
+      status: 'processing',
       progress: 0,
-      imagePaths, // Сохраняем пути для очистки при отмене
+      imagePaths, // Сохраняем пути для очистки
       createdAt: new Date(),
     };
 
@@ -121,12 +128,12 @@ router.post("/render", upload.array("images", 10), async (req, res) => {
           if (session) {
             session.progress = progress;
           }
-        },
+        }
       )
       .then(() => {
         const session = sessions.get(sessionId);
         if (session) {
-          session.status = "completed";
+          session.status = 'completed';
           session.progress = 100;
           session.videoPath = outputPath;
         }
@@ -137,7 +144,7 @@ router.post("/render", upload.array("images", 10), async (req, res) => {
       .catch((error) => {
         const session = sessions.get(sessionId);
         if (session) {
-          session.status = "error";
+          session.status = 'error';
           session.error = error.message;
         }
 
@@ -151,23 +158,23 @@ router.post("/render", upload.array("images", 10), async (req, res) => {
 
     res.json({
       sessionId,
-      message: "Рендеринг запущен",
+      message: 'Рендеринг запущен',
     });
   } catch (error: any) {
     res.status(500).json({
-      error: error.message || "Внутренняя ошибка сервера",
+      error: error.message || 'Внутренняя ошибка сервера',
     });
   }
 });
 
 // GET /api/status/:sessionId - Получить статус рендеринга
-router.get("/status/:sessionId", (req, res) => {
+router.get('/status/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
 
   if (!session) {
     return res.status(404).json({
-      error: "Сессия не найдена",
+      error: 'Сессия не найдена',
     });
   }
 
@@ -179,30 +186,30 @@ router.get("/status/:sessionId", (req, res) => {
 });
 
 // GET /api/download/:sessionId - Скачать готовое видео
-router.get("/download/:sessionId", (req, res) => {
+router.get('/download/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
 
   if (!session) {
     return res.status(404).json({
-      error: "Сессия не найдена",
+      error: 'Сессия не найдена',
     });
   }
 
-  if (session.status !== "completed") {
+  if (session.status !== 'completed') {
     return res.status(400).json({
-      error: "Видео еще не готово",
+      error: 'Видео еще не готово',
       status: session.status,
     });
   }
 
   if (!session.videoPath || !fileExists(session.videoPath)) {
     return res.status(404).json({
-      error: "Файл видео не найден",
+      error: 'Файл видео не найден',
     });
   }
 
-  res.download(session.videoPath, "video.mp4", (err) => {
+  res.download(session.videoPath, 'video.mp4', (err) => {
     if (!err) {
       // Очистка после успешной загрузки
       setTimeout(() => {
@@ -216,13 +223,13 @@ router.get("/download/:sessionId", (req, res) => {
 });
 
 // DELETE /api/video/:sessionId - Удалить видео и сессию
-router.delete("/video/:sessionId", (req, res) => {
+router.delete('/video/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
 
   if (!session) {
     return res.status(404).json({
-      error: "Сессия не найдена",
+      error: 'Сессия не найдена',
     });
   }
 
@@ -239,31 +246,31 @@ router.delete("/video/:sessionId", (req, res) => {
   sessions.delete(sessionId);
 
   res.json({
-    message: "Видео и сессия удалены",
+    message: 'Видео и сессия удалены',
   });
 });
 
 // POST /api/cancel/:sessionId - Отменить рендеринг
-router.post("/cancel/:sessionId", (req, res) => {
+router.post('/cancel/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
 
   if (!session) {
     return res.status(404).json({
-      error: "Сессия не найдена",
+      error: 'Сессия не найдена',
     });
   }
 
-  if (session.status !== "processing") {
+  if (session.status !== 'processing') {
     return res.status(400).json({
-      error: "Сессия уже завершена или отменена",
+      error: 'Сессия уже завершена или отменена',
     });
   }
 
   const cancelled = renderer.cancelRendering(sessionId);
 
   if (cancelled) {
-    session.status = "cancelled";
+    session.status = 'cancelled';
 
     // Удаляем видео файл если он существует (может быть частично создан)
     const videoPath = session.videoPath || getVideoPath(sessionId);
@@ -275,11 +282,11 @@ router.post("/cancel/:sessionId", (req, res) => {
     }
 
     res.json({
-      message: "Рендеринг отменен",
+      message: 'Рендеринг отменен',
     });
   } else {
     res.status(500).json({
-      error: "Не удалось отменить рендеринг",
+      error: 'Не удалось отменить рендеринг',
     });
   }
 });
